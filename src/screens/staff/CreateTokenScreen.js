@@ -4008,6 +4008,8 @@ export default function CreateTokenScreen({ navigation }) {
   };
 
   // ── FIX: WhatsApp via https://wa.me/ — works on Android & iOS without any config ──
+  const closeSuccessPopup = () => setSuccessPopup(false);
+
   const shareTokenToPatient = async () => {
     if (!createdToken.patientPhone) {
       Alert.alert("Phone Missing", "Enter patient phone number to share.");
@@ -4025,13 +4027,25 @@ export default function CreateTokenScreen({ navigation }) {
     const phoneWithCC = cleanPhone.startsWith("91") ? cleanPhone : `91${cleanPhone}`;
     const encoded = encodeURIComponent(message);
 
-    await Linking.openURL(`https://wa.me/${phoneWithCC}?text=${encoded}`).catch(() => {
-      Linking.openURL(
-        Platform.OS === "ios"
-          ? `sms:${createdToken.patientPhone}&body=${encoded}`
-          : `sms:${createdToken.patientPhone}?body=${encoded}`
-      ).catch(() => Alert.alert("Error", "Could not open WhatsApp or SMS."));
-    });
+    const whatsappUrl = `whatsapp://send?phone=${phoneWithCC}&text=${encoded}`;
+    const waMeUrl = `https://wa.me/${phoneWithCC}?text=${encoded}`;
+    const smsUrl =
+      Platform.OS === "ios"
+        ? `sms:${createdToken.patientPhone}&body=${encoded}`
+        : `sms:${createdToken.patientPhone}?body=${encoded}`;
+
+    try {
+      const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
+      if (canOpenWhatsApp) {
+        await Linking.openURL(whatsappUrl);
+        return;
+      }
+      await Linking.openURL(waMeUrl);
+    } catch (error) {
+      await Linking.openURL(smsUrl).catch(() => {
+        Alert.alert("Error", "Could not open WhatsApp or SMS.");
+      });
+    }
   };
 
   if (loading && tokens.length === 0) {
@@ -4108,18 +4122,20 @@ export default function CreateTokenScreen({ navigation }) {
       </ScrollView>
 
       {/* Success Modal */}
-      <Modal visible={successPopup} transparent animationType="fade">
+      <Modal visible={successPopup} transparent animationType="fade" onRequestClose={closeSuccessPopup}>
           <View style={styles.modalOverlay}>
              <MotiView from={{scale:0.9}} animate={{scale:1}} style={styles.successCard}>
                 <Ionicons name="checkmark-circle" size={60} color={STAFF_COLOR} />
                 <Text style={styles.successTitle}>Token: {createdToken.tokenNo}</Text>
                 <Text style={styles.successMessage}>Confirmed for {createdToken.patientName}</Text>
-                <TouchableOpacity style={styles.shareButton} onPress={shareTokenToPatient}>
-                    <Text style={styles.shareButtonText}>WhatsApp Token</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.secondaryButton} onPress={() => setSuccessPopup(false)}>
-                    <Text style={styles.secondaryButtonText}>Done</Text>
-                </TouchableOpacity>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={[styles.shareButton, { flex: 1 }]} onPress={shareTokenToPatient}>
+                      <Text style={styles.shareButtonText}>Share via WhatsApp</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={closeSuccessPopup}>
+                      <Text style={styles.secondaryButtonText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
              </MotiView>
           </View>
       </Modal>
@@ -4622,8 +4638,8 @@ const styles = StyleSheet.create({
   },
 
   shareButton: {
-    width: "100%",
-    height: 52,
+    flex: 1,
+    minHeight: 52,
     borderRadius: 18,
     backgroundColor: STAFF_COLOR,
     alignItems: "center",
@@ -4631,6 +4647,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     marginBottom: 12,
+    paddingHorizontal: 16,
   },
 
   shareButtonText: {
