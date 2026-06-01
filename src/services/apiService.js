@@ -2,7 +2,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export const BASE_URL = "http://192.168.0.17:8080/api"; // ← Your backend IP
+export const BASE_URL = "http://16.112.236.123 :8080/api"; // ← Your backend IP
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
