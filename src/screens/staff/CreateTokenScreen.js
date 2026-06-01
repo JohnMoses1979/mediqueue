@@ -4012,7 +4012,10 @@ export default function CreateTokenScreen({ navigation }) {
 
   const shareTokenToPatient = async () => {
     if (!createdToken.patientPhone) {
-      Alert.alert("Phone Missing", "Enter patient phone number to share.");
+      Alert.alert(
+        "Phone Number Required",
+        "Please enter the patient's phone number to share the token via WhatsApp."
+      );
       return;
     }
 
@@ -4027,24 +4030,19 @@ export default function CreateTokenScreen({ navigation }) {
     const phoneWithCC = cleanPhone.startsWith("91") ? cleanPhone : `91${cleanPhone}`;
     const encoded = encodeURIComponent(message);
 
-    const whatsappUrl = `whatsapp://send?phone=${phoneWithCC}&text=${encoded}`;
-    const waMeUrl = `https://wa.me/${phoneWithCC}?text=${encoded}`;
-    const smsUrl =
-      Platform.OS === "ios"
-        ? `sms:${createdToken.patientPhone}&body=${encoded}`
-        : `sms:${createdToken.patientPhone}?body=${encoded}`;
-
     try {
+      // Direct WhatsApp opening with patient number
+      const whatsappUrl = `whatsapp://send?phone=${phoneWithCC}&text=${encoded}`;
       const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
+      
       if (canOpenWhatsApp) {
         await Linking.openURL(whatsappUrl);
-        return;
+      } else {
+        // Fallback to wa.me
+        await Linking.openURL(`https://wa.me/${phoneWithCC}?text=${encoded}`);
       }
-      await Linking.openURL(waMeUrl);
     } catch (error) {
-      await Linking.openURL(smsUrl).catch(() => {
-        Alert.alert("Error", "Could not open WhatsApp or SMS.");
-      });
+      Alert.alert("Error", "Could not open WhatsApp. Please share manually.");
     }
   };
 
