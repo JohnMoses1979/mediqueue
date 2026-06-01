@@ -2031,6 +2031,10 @@ export default function AdminLoginScreen({ navigation }) {
 
   // ── STEP 1: verify security answer ───────────────────────────────────────
   const handleForgotStep1 = () => {
+    if (!email.trim()) {
+      showPopup("Missing Email", "Please enter your admin email before resetting the password.");
+      return;
+    }
     if (!securityAnswer.trim()) {
       showPopup("Missing Answer", "Please enter the answer to the security question.");
       return;
@@ -2044,6 +2048,10 @@ export default function AdminLoginScreen({ navigation }) {
 
   // ── STEP 2: reset password → saved to MySQL DB ────────────────────────────
   const handleResetPassword = async () => {
+    if (!email.trim()) {
+      showPopup("Missing Email", "Please enter your admin email before resetting the password.");
+      return;
+    }
     if (!newPassword.trim() || !confirmPassword.trim()) {
       showPopup("Missing Fields", "Please fill in both password fields.");
       return;
@@ -2059,7 +2067,7 @@ export default function AdminLoginScreen({ navigation }) {
     setLoading(true);
     try {
       await adminResetPassword(
-        "",
+        email.trim().toLowerCase(),
         securityAnswer.trim(),
         newPassword.trim()
       );

@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import {
   ScrollView,
@@ -13,6 +14,7 @@ import {
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons";
 import { Platform } from "react-native";
 import { MotiView } from "moti";
@@ -91,10 +93,32 @@ export default function HospitalRegisterScreen({ navigation }) {
       copyToCacheDirectory: true,
       multiple: false,
     });
-    if (!result.canceled) {
-      const file = result.assets[0];
-      setDocuments((prev) => [...prev, file]);
+
+    const canceled =
+      result.canceled === true ||
+      result.type === "cancel" ||
+      result.type === "dismiss";
+    if (canceled) return;
+
+    const file = result.assets?.[0] || result;
+    const uri = file.uri || file.file?.uri;
+    const name = file.name || file.file?.name || "document";
+    const mimeType =
+      file.mimeType || file.type || file.file?.mimeType || file.file?.type || "application/octet-stream";
+
+    if (!uri) {
+      showAlert("Upload Error", "Unable to read the selected document. Please try again.");
+      return;
     }
+
+    setDocuments((prev) => [
+      ...prev,
+      {
+        uri,
+        name,
+        mimeType,
+      },
+    ]);
   };
 
   const removeDocument = (index) =>
@@ -107,40 +131,43 @@ export default function HospitalRegisterScreen({ navigation }) {
   };
 
   // ── HELPERS ────────────────────────────────────────────────────────────────
-  // Converts any URI (file://, content://, blob:, or already data:) to a
-  // base64 data URL. Uses fetch + FileReader which works reliably on ALL
-  // platforms (Android, iOS, Web) in both dev and production builds.
+  // Converts any URI (file://, blob:, or already data:) to a base64 data URL.
+  // Works on both native (uses expo-file-system) and web (uses fetch + FileReader).
   const uriToBase64DataUrl = async (uri, mimeHint = "image/jpeg") => {
+    if (!uri) {
+      throw new Error("Invalid file URI. Please select the file again.");
+    }
+
     // Already a data URL — pass through
-    if (uri.startsWith("data:")) return uri;
+    if (typeof uri === "string" && uri.startsWith("data:")) return uri;
 
-    try {
-      // fetch(file:// or content://) works in React Native Hermes engine
-      const response = await fetch(uri);
-      const blob = await response.blob();
+    const stringUri = typeof uri === "string" ? uri : uri.uri;
+    if (!stringUri) {
+      throw new Error("Invalid file URI. Please select the file again.");
+    }
 
+    if (Platform.OS === "web" || stringUri.startsWith("blob:")) {
+      const resp = await fetch(stringUri);
+      const blob = await resp.blob();
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result); // "data:<mime>;base64,..."
-        reader.onerror = () => reject(new Error("FileReader failed to read file"));
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
-    } catch (fetchErr) {
-      // Fallback: try expo-file-system using plain string encoding (avoids
-      // EncodingType.Base64 property access which fails if module is undefined)
-      try {
-        const FileSystem = await import("expo-file-system");
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: "Base64",
-        });
-        return `data:${mimeHint};base64,${base64}`;
-      } catch (fsErr) {
-        throw new Error(
-          "Could not read file. Please try selecting it again. (" +
-            (fsErr.message || String(fsErr)) +
-            ")"
-        );
+    } else {
+      if (!FileSystem || !FileSystem.readAsStringAsync) {
+        throw new Error("File system is unavailable. Please restart the app and try again.");
       }
+
+      const encoding =
+        FileSystem.EncodingType?.Base64 ||
+        FileSystem.EncodingType?.base64 ||
+        "base64";
+      const base64 = await FileSystem.readAsStringAsync(stringUri, {
+        encoding,
+      });
+      return `data:${mimeHint};base64,${base64}`;
     }
   };
 
@@ -150,6 +177,13 @@ export default function HospitalRegisterScreen({ navigation }) {
 
     setLoading(true);
     try {
+      if (!image) {
+        throw new Error("Please select a hospital photo before submitting.");
+      }
+      if (documents.length === 0) {
+        throw new Error("Please upload at least one verification document.");
+      }
+
       // Convert hospital image to base64 data URL
       const ext = (image || "").split(".").pop().toLowerCase();
       const imageMime = ext === "png" ? "image/png" : "image/jpeg";
@@ -158,9 +192,13 @@ export default function HospitalRegisterScreen({ navigation }) {
       // Convert each document to base64 data URL
       const docBase64List = await Promise.all(
         documents.map(async (doc) => {
+          if (!doc?.uri) {
+            throw new Error("One of the selected documents is invalid. Please re-upload the file.");
+          }
+
           const mime = doc.mimeType || "application/octet-stream";
           const data = await uriToBase64DataUrl(doc.uri, mime);
-          return { name: doc.name, data };
+          return { name: doc.name || "document", data };
         })
       );
 
@@ -179,16 +217,17 @@ export default function HospitalRegisterScreen({ navigation }) {
         numberOfDoctors: parseInt(form.doctors, 10) || 0,
         imageUrl: imageData,
         documentUrls: JSON.stringify(docBase64List),
-        status: "PENDING",
       });
 
-      setAssignedHospitalId(res.hospitalId);
+      const assignedId = res.hospitalId || res.hospital?.hospitalId;
+      if (!assignedId) {
+        throw new Error("Hospital registration completed but server did not return an ID.");
+      }
+
+      setAssignedHospitalId(assignedId);
       setSuccessPopup(true);
     } catch (err) {
-      showAlert(
-        "Submission Failed",
-        err.message || "Something went wrong. Please try again."
-      );
+      showAlert("Submission Failed", err.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -421,9 +460,7 @@ export default function HospitalRegisterScreen({ navigation }) {
               style={styles.docRow}
             >
               <Ionicons name="document-attach" size={22} color={COLORS.staff} />
-              <Text style={styles.docName} numberOfLines={1}>
-                {doc.name}
-              </Text>
+              <Text style={styles.docName} numberOfLines={1}>{doc.name}</Text>
               <TouchableOpacity onPress={() => removeDocument(index)}>
                 <Ionicons name="close-circle" size={20} color="#EF4444" />
               </TouchableOpacity>
@@ -446,21 +483,15 @@ export default function HospitalRegisterScreen({ navigation }) {
               style={{ marginTop: 24, marginBottom: 50 }}
             />
           ) : (
-            <TouchableOpacity
-              activeOpacity={isFormValid ? 0.85 : 1}
-              onPress={isFormValid ? submit : undefined}
-              style={{ marginTop: 24, marginBottom: 50 }}
-            >
+            <View style={{ marginTop: 24, marginBottom: 50 }}>
               <GradientButton
                 title="Submit for Verification"
-                colors={
-                  isFormValid ? [COLORS.staff, "#14B8A6"] : ["#CBD5E1", "#94A3B8"]
-                }
+                colors={isFormValid ? [COLORS.staff, "#14B8A6"] : ["#CBD5E1", "#94A3B8"]}
                 onPress={isFormValid ? submit : undefined}
                 disabled={!isFormValid}
                 style={{ opacity: isFormValid ? 1 : 0.6 }}
               />
-            </TouchableOpacity>
+            </View>
           )}
         </MotiView>
       </ScrollView>
@@ -492,11 +523,7 @@ export default function HospitalRegisterScreen({ navigation }) {
             <View style={styles.idCard}>
               <Text style={styles.idLabel}>YOUR HOSPITAL ID</Text>
               <Text style={styles.idValue}>{assignedHospitalId}</Text>
-              <TouchableOpacity
-                style={styles.copyBtn}
-                onPress={copyHospitalId}
-                activeOpacity={0.8}
-              >
+              <TouchableOpacity style={styles.copyBtn} onPress={copyHospitalId} activeOpacity={0.8}>
                 <Ionicons
                   name={copied ? "checkmark-circle" : "copy-outline"}
                   size={16}
@@ -609,12 +636,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
   },
-  docName: {
-    flex: 1,
-    color: COLORS.text,
-    fontWeight: "600",
-    marginHorizontal: 10,
-  },
+  docName: { flex: 1, color: COLORS.text, fontWeight: "600", marginHorizontal: 10 },
 
   hintRow: {
     flexDirection: "row",
@@ -666,12 +688,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 18,
   },
-  successTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: COLORS.text,
-    textAlign: "center",
-  },
+  successTitle: { fontSize: 22, fontWeight: "900", color: COLORS.text, textAlign: "center" },
   successMessage: {
     marginTop: 10,
     fontSize: 13,

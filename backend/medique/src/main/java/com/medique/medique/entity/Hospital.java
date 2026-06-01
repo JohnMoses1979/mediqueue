@@ -660,10 +660,12 @@ public class Hospital {
     private String departments;
     private Integer numberOfDoctors;
 
-    @Column(columnDefinition = "LONGTEXT")
+    @Lob
+    @Column(name = "image_url", columnDefinition = "LONGTEXT")
     private String imageUrl;
 
-    @Column(columnDefinition = "LONGTEXT")
+    @Lob
+    @Column(name = "document_urls", columnDefinition = "LONGTEXT")
     private String documentUrls;
 
     private String openingTime;
